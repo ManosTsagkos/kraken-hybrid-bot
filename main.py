@@ -95,17 +95,77 @@ state = load_state(op_cfg["state_file"])
 logger.info(f"Loaded initial state: {state}")
 
 # ------------------------------------------------------------
-# Παγκόσμιες μεταβλητές για την κατάσταση του bot
+# Global μεταβλητές για την κατάσταση του bot
 # ------------------------------------------------------------
 tech_snapshot = None
 last_tech_refresh = 0.0
 
 # ------------------------------------------------------------
+# Αρχική ανανέωση τεχνικών δεδομένων (για να έχουμε snapshot από την αρχή)
+# ------------------------------------------------------------
+logger.info("Performing initial technical refresh...")
+try:
+    ohlc = client.get_ohlc(pair, interval=tech_cfg["candle_interval_minutes"])
+    pair_key = next(k for k in ohlc.keys() if k != "last")
+    df = kraken_ohlc_to_dataframe(ohlc, pair_key)
+    tech_snapshot = compute_technical_snapshot(
+        df,
+        ema_fast=tech_cfg["ema_fast"],
+        ema_mid=tech_cfg["ema_mid"],
+        ema_slow=tech_cfg["ema_slow"],
+        rsi_period=tech_cfg["rsi_period"],
+        rsi_bull_threshold=tech_cfg["rsi_bull_threshold"],
+        rsi_bear_threshold=tech_cfg["rsi_bear_threshold"],
+        roc_period=tech_cfg["roc_period"],
+        roc_exhaustion_lookback=tech_cfg["roc_exhaustion_lookback"],
+    )
+    last_tech_refresh = time.time()
+    logger.info(f"Initial technical snapshot loaded: trend={tech_snapshot.trend}, close={tech_snapshot.close}, rsi={tech_snapshot.rsi:.1f}")
+except Exception as e:
+    logger.error(f"Initial technical refresh failed: {e}")
+    tech_snapshot = None
+
+# ------------------------------------------------------------
 # Συναρτήσεις που εκτελούν τη λογική
 # ------------------------------------------------------------
+def run_technical_refresh():
+    """Ανανέωση τεχνικών δεδομένων (4H candles) – καλείται κάθε 15 λεπτά"""
+    global tech_snapshot, last_tech_refresh
+
+    try:
+        ohlc = client.get_ohlc(pair, interval=tech_cfg["candle_interval_minutes"])
+        pair_key = next(k for k in ohlc.keys() if k != "last")
+        df = kraken_ohlc_to_dataframe(ohlc, pair_key)
+        tech_snapshot = compute_technical_snapshot(
+            df,
+            ema_fast=tech_cfg["ema_fast"],
+            ema_mid=tech_cfg["ema_mid"],
+            ema_slow=tech_cfg["ema_slow"],
+            rsi_period=tech_cfg["rsi_period"],
+            rsi_bull_threshold=tech_cfg["rsi_bull_threshold"],
+            rsi_bear_threshold=tech_cfg["rsi_bear_threshold"],
+            roc_period=tech_cfg["roc_period"],
+            roc_exhaustion_lookback=tech_cfg["roc_exhaustion_lookback"],
+        )
+        last_tech_refresh = time.time()
+        logger.info(f"Technical refresh OK: trend={tech_snapshot.trend}, close={tech_snapshot.close}, rsi={tech_snapshot.rsi:.1f}")
+        return "Technical data updated"
+    except (KrakenAPIError, ValueError, StopIteration, Exception) as e:
+        logger.error(f"Error in technical refresh: {e}", exc_info=True)
+        raise  # το πιάνει το try/except στο route
+
 def run_fast_loop():
     """Γρήγορο loop: macro, news, decision, execution (καλείται κάθε λεπτό)"""
-    global state, tech_snapshot
+    global state, tech_snapshot, last_tech_refresh
+
+    # Αν το tech_snapshot είναι None, προσπάθησε να το ανανεώσεις άμεσα
+    if tech_snapshot is None:
+        logger.warning("tech_snapshot is None, attempting immediate refresh...")
+        try:
+            run_technical_refresh()
+        except Exception as e:
+            logger.error(f"Immediate technical refresh failed: {e}")
+            return "No technical data available - skipping decision"
 
     try:
         # 1. Poll μακροοικονομικών και ειδήσεων
@@ -137,32 +197,6 @@ def run_fast_loop():
 
     except Exception as e:
         logger.error(f"Error in fast loop: {e}", exc_info=True)
-        raise  # το πιάνει το try/except στο route
-
-def run_technical_refresh():
-    """Ανανέωση τεχνικών δεδομένων (4H candles) – καλείται κάθε 15 λεπτά"""
-    global tech_snapshot, last_tech_refresh
-
-    try:
-        ohlc = client.get_ohlc(pair, interval=tech_cfg["candle_interval_minutes"])
-        pair_key = next(k for k in ohlc.keys() if k != "last")
-        df = kraken_ohlc_to_dataframe(ohlc, pair_key)
-        tech_snapshot = compute_technical_snapshot(
-            df,
-            ema_fast=tech_cfg["ema_fast"],
-            ema_mid=tech_cfg["ema_mid"],
-            ema_slow=tech_cfg["ema_slow"],
-            rsi_period=tech_cfg["rsi_period"],
-            rsi_bull_threshold=tech_cfg["rsi_bull_threshold"],
-            rsi_bear_threshold=tech_cfg["rsi_bear_threshold"],
-            roc_period=tech_cfg["roc_period"],
-            roc_exhaustion_lookback=tech_cfg["roc_exhaustion_lookback"],
-        )
-        last_tech_refresh = time.time()
-        logger.info(f"Technical refresh OK: trend={tech_snapshot.trend}, close={tech_snapshot.close}, rsi={tech_snapshot.rsi:.1f}")
-        return "Technical data updated"
-    except (KrakenAPIError, ValueError, StopIteration, Exception) as e:
-        logger.error(f"Error in technical refresh: {e}", exc_info=True)
         raise  # το πιάνει το try/except στο route
 
 # ------------------------------------------------------------
