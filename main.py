@@ -46,10 +46,42 @@ from flask import Flask
 
 app = Flask(__name__)  # <-- Αυτό είναι το object που ψάχνει η Gunicorn
 
+import time
+from datetime import datetime
+
+# Τελευταία φορά που τραβήχτηκαν τεχνικά δεδομένα
+last_technical_refresh = 0
+
 @app.route('/')
 def home():
-    return "Hello, World!"
+    global last_technical_refresh
+    
+    now = time.time()
+    print(f"[{datetime.now()}] Bot called by cron-job.org")
 
+    # 1. Πάντα τρέχουμε το γρήγορο loop (μακρο + νέα + απόφαση)
+    #    Αυτό υποθέτω ότι είναι μια συνάρτηση που λέγεται π.χ. `run_fast_loop()`
+    try:
+        result = run_fast_loop()  # η δική σου συνάρτηση για μακρο/νέα/απόφαση
+        print(f"[{datetime.now()}] Fast loop result: {result}")
+    except Exception as e:
+        print(f"[{datetime.now()}] ERROR in fast loop: {e}")
+        return f"Error: {e}", 500
+
+    # 2. Έλεγχος αν πρέπει να ανανεώσουμε τα τεχνικά (κάθε 15 λεπτά = 900 sec)
+    if now - last_technical_refresh >= 900:
+        print(f"[{datetime.now()}] Refreshing technical data (4H candles)...")
+        try:
+            run_technical_refresh()  # η δική σου συνάρτηση για τεχνικά
+            last_technical_refresh = now
+            print(f"[{datetime.now()}] Technical data refreshed")
+        except Exception as e:
+            print(f"[{datetime.now()}] ERROR in technical refresh: {e}")
+            # Δεν κάνουμε return error για να μην χαλάσει το cron-job
+            # αλλά το καταγράφουμε
+
+    return "OK", 200
+  
 def load_config(path: str = "config.yaml") -> dict:
     with open(path, "r") as f:
         return yaml.safe_load(f)
