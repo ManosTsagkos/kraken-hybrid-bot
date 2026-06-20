@@ -53,9 +53,22 @@ if dry_run:
 else:
     logger.warning("!!! LIVE TRADING MODE - DRY_RUN=false - REAL ORDERS WILL BE SENT WITH REAL FUNDS !!!")
 
+# --- Διόρθωση του API secret ---
+raw_secret = os.getenv("KRAKEN_API_SECRET", "").strip()
+if raw_secret:
+    # Προσωρινό print για έλεγχο (θα το βγάλεις μετά)
+    print(f"[DEBUG] Secret length: {len(raw_secret)}")
+    # Αν το μήκος δεν είναι πολλαπλάσιο του 4, προσθέτουμε '=' στο τέλος
+    missing_padding = len(raw_secret) % 4
+    if missing_padding:
+        raw_secret += "=" * (4 - missing_padding)
+        print(f"[DEBUG] Added padding, new length: {len(raw_secret)}")
+else:
+    print("[ERROR] KRAKEN_API_SECRET is empty or not set!")
+
 client = KrakenClient(
-    api_key=os.getenv("KRAKEN_API_KEY", ""),
-    api_secret=os.getenv("KRAKEN_API_SECRET", ""),
+    api_key=os.getenv("KRAKEN_API_KEY", "").strip(),
+    api_secret=raw_secret,
     dry_run=dry_run,
 )
 
