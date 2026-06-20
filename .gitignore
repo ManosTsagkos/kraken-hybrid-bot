@@ -1,0 +1,18 @@
+# NEVER commit real secrets
+.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Runtime-generated, machine-specific
+logs/*.log*
+state/bot_state.json
+
+# OS / editor noise
+.DS_Store
+.vscode/
+.idea/

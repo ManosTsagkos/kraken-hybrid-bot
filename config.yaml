@@ -1,0 +1,75 @@
+# =============================================================================
+# Institutional Hybrid Engine - Strategy Configuration
+# =============================================================================
+# Edit these values to tune the strategy. Nothing here is "the right answer" -
+# these are starting points based on the strategy description. Test extensively
+# in DRY_RUN before trusting any of these numbers with real capital.
+
+exchange:
+  pair: "XXBTZUSD"          # Kraken pair code (e.g. XXBTZUSD = BTC/USD, XETHZUSD = ETH/USD)
+  display_pair: "XBT/USD"   # human-readable, for logs only
+
+# ---------------------------------------------------------------------------
+# 1. Technical substrate - 4H anchor trend
+# ---------------------------------------------------------------------------
+technical:
+  candle_interval_minutes: 240   # Kraken OHLC interval = 4 hours
+  ema_fast: 9
+  ema_mid: 21
+  ema_slow: 55
+  rsi_period: 14
+  rsi_bull_threshold: 60         # RSI must be above this to confirm LONG momentum
+  rsi_bear_threshold: 40         # RSI must be below this to confirm SHORT momentum
+  roc_period: 10                 # Rate of Change lookback (in 4H bars)
+  roc_exhaustion_lookback: 3     # how many bars back to compare ROC for "exhaustion" detection
+  refresh_seconds: 900           # how often to re-pull 4H candles and recompute trend (15 min)
+
+# ---------------------------------------------------------------------------
+# 2. Macro / catalyst engine - polls every N seconds
+# ---------------------------------------------------------------------------
+macro:
+  poll_seconds: 60               # "1-minute polling" from the strategy doc
+  vix_risk_off_threshold: 28      # VIX above this = systemic risk-off
+  vix_calm_threshold: 20          # VIX below this = calm / normal regime
+  dxy_spike_window_minutes: 15    # window to measure a "sudden" DXY move
+  dxy_spike_pct_threshold: 0.5    # % move within the window considered a "spike"
+  defensive_trailing_stop_pct: 0.5   # tighten trailing stop to this % in Defensive Mode
+  defensive_position_cutback_pct: 50 # % of position to close in Defensive Mode
+
+news:
+  poll_seconds: 60
+  geopolitical_score_flip_threshold: 7   # score out of 10 -> Strategy Flip (close & reverse)
+  ipo_keywords:
+    capital_drain: ["openai ipo", "spacex ipo", "ipo pricing", "ipo date set", "roadshow"]
+    ai_bubble_expansion: ["anthropic valuation", "anthropic ipo", "ai funding round", "ai valuation surge"]
+  geopolitical_keywords:
+    - "war"
+    - "invasion"
+    - "missile strike"
+    - "trade route closed"
+    - "strait closed"
+    - "sanctions imposed"
+    - "central bank emergency"
+    - "martial law"
+  ipo_position_size_cut_pct: 50   # reduce max position size by this % around mega-IPO events
+
+# ---------------------------------------------------------------------------
+# 3. Risk management (hard caps - these protect you regardless of what the
+#    strategy/decision engine decides; the bot will never exceed these)
+# ---------------------------------------------------------------------------
+risk:
+  max_leverage: 2                       # hard ceiling, even if strategy logic asks for more
+  base_leverage: 1                      # leverage used in normal/no-event conditions
+  max_position_pct_of_equity: 25        # never risk more than this % of account equity in one trade
+  max_daily_loss_pct: 5                 # circuit breaker: if daily P&L drops below -5%, halt all new trades
+  default_stop_loss_pct: 1.5            # initial stop-loss distance from entry, in normal mode
+  trailing_stop_pct: 1.0                # default trailing stop in normal mode
+
+# ---------------------------------------------------------------------------
+# Operational
+# ---------------------------------------------------------------------------
+operational:
+  state_file: "state/bot_state.json"
+  log_file: "logs/bot.log"
+  log_level: "INFO"
+  kill_switch_file: "STOP"   # if this file exists in the project root, bot halts immediately
