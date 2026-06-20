@@ -211,7 +211,7 @@ def run_fast_loop():
 
         # 4. Εκτέλεση μέσω WunderTrading (το risk_result μπορεί να χρησιμοποιηθεί για να αποφασίσουμε αν θα στείλουμε σήμα)
         # Αν το risk_result επιτρέπει την εντολή, στέλνουμε
-        if risk_result.is_allowed:
+        if risk_result.allowed:   # <--- ΔΙΟΡΘΩΣΗ: is_allowed -> allowed
             state = executor.execute_decision(decision, state)
         else:
             logger.info(f"Risk manager blocked action: {decision.action.value}")
