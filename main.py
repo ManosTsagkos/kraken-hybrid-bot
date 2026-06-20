@@ -1,7 +1,7 @@
 """
 main.py
 --------
-Institutional Hybrid Engine - orchestrator (Flask version for Render + cron-job.org)
+Institutional Hybrid Engine - orchestrator (Flask version for Render + WunderTrading execution)
 """
 
 from __future__ import annotations
@@ -20,7 +20,8 @@ from kraken_client import KrakenAPIError, KrakenClient
 from logger_setup import setup_logger
 from macro_engine import MacroEngine, YFinanceMacroProvider
 from news_engine import NewsAPIProvider, NewsEngine
-from order_executor import OrderExecutor
+# Αντικαθιστούμε το order_executor με το wunder_executor
+from wunder_executor import WunderExecutor
 from risk_manager import RiskManager
 from state import load_state, save_state
 
@@ -48,28 +49,20 @@ logger = setup_logger(
 
 dry_run = os.getenv("DRY_RUN", "true").strip().lower() in ("1", "true", "yes")
 if dry_run:
-    logger.warning("Running in DRY_RUN mode - Kraken will validate but NEVER execute orders. "
-                   "Set DRY_RUN=false in .env only after you have reviewed behaviour thoroughly.")
+    logger.warning("Running in DRY_RUN mode - signals will be logged but NOT sent to WunderTrading.")
 else:
-    logger.warning("!!! LIVE TRADING MODE - DRY_RUN=false - REAL ORDERS WILL BE SENT WITH REAL FUNDS !!!")
+    logger.warning("!!! LIVE TRADING MODE - DRY_RUN=false - REAL ORDERS WILL BE SENT VIA WUNDERTRADING !!!")
 
-# --- Διόρθωση του API secret ---
-raw_secret = os.getenv("KRAKEN_API_SECRET", "").strip()
-if raw_secret:
-    # Προσωρινό print για έλεγχο (θα το βγάλεις μετά)
-    print(f"[DEBUG] Secret length: {len(raw_secret)}")
-    # Αν το μήκος δεν είναι πολλαπλάσιο του 4, προσθέτουμε '=' στο τέλος
-    missing_padding = len(raw_secret) % 4
-    if missing_padding:
-        raw_secret += "=" * (4 - missing_padding)
-        print(f"[DEBUG] Added padding, new length: {len(raw_secret)}")
-else:
-    print("[ERROR] KRAKEN_API_SECRET is empty or not set!")
-
+# ------------------------------------------------------------
+# KrakenClient (μόνο για public endpoints - OHLC)
+# ------------------------------------------------------------
+# Δεν χρειαζόμαστε πια τα API keys για το KrakenClient,
+# αλλά τα κρατάμε για να μην σπάσει ο κώδικας (για get_ohlc).
+# Μπορούμε να τα αφήσουμε κενά αν είναι μόνο για public calls.
 client = KrakenClient(
-    api_key=os.getenv("KRAKEN_API_KEY", "").strip(),
-    api_secret=raw_secret,
-    dry_run=dry_run,
+    api_key="",  # δεν χρειάζεται για public endpoints
+    api_secret="",
+    dry_run=True,  # δεν έχει σημασία
 )
 
 pair = cfg["exchange"]["pair"]
@@ -79,6 +72,9 @@ news_cfg = cfg["news"]
 risk_cfg = cfg["risk"]
 op_cfg = cfg["operational"]
 
+# ------------------------------------------------------------
+# Μακροοικονομικά, Νέα, Απόφαση, Risk Manager
+# ------------------------------------------------------------
 macro_engine = MacroEngine(
     provider=YFinanceMacroProvider(),
     vix_risk_off_threshold=macro_cfg["vix_risk_off_threshold"],
@@ -101,7 +97,20 @@ risk_manager = RiskManager(
     max_daily_loss_pct=risk_cfg["max_daily_loss_pct"],
     default_stop_loss_pct=risk_cfg["default_stop_loss_pct"],
 )
-executor = OrderExecutor(client, pair, logger, risk_cfg["default_stop_loss_pct"])
+
+# ------------------------------------------------------------
+# WunderTrading Executor
+# ------------------------------------------------------------
+WUNDER_WEBHOOK = os.getenv("WUNDER_WEBHOOK_URL", "")
+if not WUNDER_WEBHOOK:
+    logger.error("WUNDER_WEBHOOK_URL is not set! Please add it to Render Environment Variables.")
+    # Δεν κάνουμε exit για να μην σπάσει το deployment, αλλά το bot δεν θα στέλνει σήματα
+
+executor = WunderExecutor(
+    webhook_url=WUNDER_WEBHOOK,
+    logger=logger,
+    dry_run=dry_run,
+)
 
 # Φόρτωση αρχικής κατάστασης
 state = load_state(op_cfg["state_file"])
@@ -188,8 +197,8 @@ def run_fast_loop():
         # 2. Λήψη απόφασης
         decision = decision_engine.decide(tech_snapshot, macro_state, news_state, state.position_side)
 
-        # 3. Έλεγχος equity και risk
-        equity = executor.get_equity_usd()
+        # 3. Risk management (χρησιμοποιούμε placeholder equity - μπορείς να το πάρεις από WunderTrading API)
+        equity = 1000.0  # placeholder - μπορείς να το αντικαταστήσεις με κλήση στο WunderTrading API
         is_opening_new_risk = decision.action.value in (
             "OPEN_LONG", "OPEN_SHORT", "STRATEGY_FLIP", "INCREASE_CONVICTION",
         )
@@ -200,8 +209,14 @@ def run_fast_loop():
             is_opening_new_risk=is_opening_new_risk,
         )
 
-        # 4. Εκτέλεση εντολής
-        state = executor.execute(decision, risk_result, state)
+        # 4. Εκτέλεση μέσω WunderTrading (το risk_result μπορεί να χρησιμοποιηθεί για να αποφασίσουμε αν θα στείλουμε σήμα)
+        # Αν το risk_result επιτρέπει την εντολή, στέλνουμε
+        if risk_result.is_allowed:
+            state = executor.execute_decision(decision, state)
+        else:
+            logger.info(f"Risk manager blocked action: {decision.action.value}")
+
+        # Αποθηκεύουμε το state (ακόμα και αν δεν άλλαξε)
         save_state(op_cfg["state_file"], state)
 
         result_msg = f"Action: {decision.action.value}, Leverage: {decision.leverage}, Equity: {equity:.2f}"
