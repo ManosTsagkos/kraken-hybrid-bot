@@ -24,6 +24,11 @@ from __future__ import annotations
 import os
 import time
 
+api_key = os.environ.get('KRAKEN_API_KEY')
+api_secret = os.environ.get('KRAKEN_API_SECRET')
+news_key = os.environ.get('NEWSAPI_KEY')
+dry_run = os.environ.get('DRY_RUN')
+
 import yaml
 from dotenv import load_dotenv
 
