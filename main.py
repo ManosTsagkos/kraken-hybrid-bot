@@ -20,7 +20,6 @@ from kraken_client import KrakenAPIError, KrakenClient
 from logger_setup import setup_logger
 from macro_engine import MacroEngine, YFinanceMacroProvider
 from news_engine import NewsAPIProvider, NewsEngine
-# Αντικαθιστούμε το order_executor με το wunder_executor
 from wunder_executor import WunderExecutor
 from risk_manager import RiskManager
 from state import load_state, save_state
@@ -56,13 +55,10 @@ else:
 # ------------------------------------------------------------
 # KrakenClient (μόνο για public endpoints - OHLC)
 # ------------------------------------------------------------
-# Δεν χρειαζόμαστε πια τα API keys για το KrakenClient,
-# αλλά τα κρατάμε για να μην σπάσει ο κώδικας (για get_ohlc).
-# Μπορούμε να τα αφήσουμε κενά αν είναι μόνο για public calls.
 client = KrakenClient(
     api_key="",  # δεν χρειάζεται για public endpoints
     api_secret="",
-    dry_run=True,  # δεν έχει σημασία
+    dry_run=True,
 )
 
 pair = cfg["exchange"]["pair"]
@@ -104,7 +100,8 @@ risk_manager = RiskManager(
 WUNDER_WEBHOOK = os.getenv("WUNDER_WEBHOOK_URL", "")
 if not WUNDER_WEBHOOK:
     logger.error("WUNDER_WEBHOOK_URL is not set! Please add it to Render Environment Variables.")
-    # Δεν κάνουμε exit για να μην σπάσει το deployment, αλλά το bot δεν θα στέλνει σήματα
+else:
+    logger.info(f"WUNDER_WEBHOOK_URL loaded: {WUNDER_WEBHOOK[:30]}...")
 
 executor = WunderExecutor(
     webhook_url=WUNDER_WEBHOOK,
@@ -123,7 +120,7 @@ tech_snapshot = None
 last_tech_refresh = 0.0
 
 # ------------------------------------------------------------
-# Αρχική ανανέωση τεχνικών δεδομένων (για να έχουμε snapshot από την αρχή)
+# Αρχική ανανέωση τεχνικών δεδομένων
 # ------------------------------------------------------------
 logger.info("Performing initial technical refresh...")
 try:
@@ -174,13 +171,12 @@ def run_technical_refresh():
         return "Technical data updated"
     except (KrakenAPIError, ValueError, StopIteration, Exception) as e:
         logger.error(f"Error in technical refresh: {e}", exc_info=True)
-        raise  # το πιάνει το try/except στο route
+        raise
 
 def run_fast_loop():
     """Γρήγορο loop: macro, news, decision, execution (καλείται κάθε λεπτό)"""
     global state, tech_snapshot, last_tech_refresh
 
-    # Αν το tech_snapshot είναι None, προσπάθησε να το ανανεώσεις άμεσα
     if tech_snapshot is None:
         logger.warning("tech_snapshot is None, attempting immediate refresh...")
         try:
@@ -190,15 +186,15 @@ def run_fast_loop():
             return "No technical data available - skipping decision"
 
     try:
-        # 1. Poll μακροοικονομικών και ειδήσεων
+        # 1. Poll
         macro_state = macro_engine.poll()
         news_state = news_engine.poll()
 
-        # 2. Λήψη απόφασης
+        # 2. Απόφαση
         decision = decision_engine.decide(tech_snapshot, macro_state, news_state, state.position_side)
 
-        # 3. Risk management (χρησιμοποιούμε placeholder equity - μπορείς να το πάρεις από WunderTrading API)
-        equity = 1000.0  # placeholder - μπορείς να το αντικαταστήσεις με κλήση στο WunderTrading API
+        # 3. Risk management
+        equity = 1000.0  # placeholder - μπορείς να το πάρεις από WunderTrading API
         is_opening_new_risk = decision.action.value in (
             "OPEN_LONG", "OPEN_SHORT", "STRATEGY_FLIP", "INCREASE_CONVICTION",
         )
@@ -209,14 +205,12 @@ def run_fast_loop():
             is_opening_new_risk=is_opening_new_risk,
         )
 
-        # 4. Εκτέλεση μέσω WunderTrading (το risk_result μπορεί να χρησιμοποιηθεί για να αποφασίσουμε αν θα στείλουμε σήμα)
-        # Αν το risk_result επιτρέπει την εντολή, στέλνουμε
-        if risk_result.allowed:   # <--- ΔΙΟΡΘΩΣΗ: is_allowed -> allowed
+        # 4. Εκτέλεση μέσω WunderTrading (διορθωμένο: risk_result.allowed)
+        if risk_result.allowed:
             state = executor.execute_decision(decision, state)
         else:
             logger.info(f"Risk manager blocked action: {decision.action.value}")
 
-        # Αποθηκεύουμε το state (ακόμα και αν δεν άλλαξε)
         save_state(op_cfg["state_file"], state)
 
         result_msg = f"Action: {decision.action.value}, Leverage: {decision.leverage}, Equity: {equity:.2f}"
@@ -225,10 +219,10 @@ def run_fast_loop():
 
     except Exception as e:
         logger.error(f"Error in fast loop: {e}", exc_info=True)
-        raise  # το πιάνει το try/except στο route
+        raise
 
 # ------------------------------------------------------------
-# Route που καλεί το cron-job.org
+# Route
 # ------------------------------------------------------------
 @app.route('/')
 def home():
@@ -237,7 +231,6 @@ def home():
     now = time.time()
     print(f"[{datetime.now()}] Bot called by cron-job.org")
 
-    # 1. Πάντα τρέχουμε το γρήγορο loop
     try:
         result = run_fast_loop()
         print(f"[{datetime.now()}] Fast loop result: {result}")
@@ -245,7 +238,6 @@ def home():
         print(f"[{datetime.now()}] ERROR in fast loop: {e}")
         return f"Error in fast loop: {e}", 500
 
-    # 2. Κάθε 15 λεπτά (900 sec) ανανεώνουμε τα τεχνικά
     if now - last_tech_refresh >= 900:
         print(f"[{datetime.now()}] Refreshing technical data (4H candles)...")
         try:
@@ -253,12 +245,11 @@ def home():
             print(f"[{datetime.now()}] Technical data refreshed")
         except Exception as e:
             print(f"[{datetime.now()}] ERROR in technical refresh: {e}")
-            # Δεν επιστρέφουμε error για να μην χαλάσει το cron-job
 
     return "OK", 200
 
 # ------------------------------------------------------------
-# Εκκίνηση (για τοπικό testing)
+# Εκκίνηση
 # ------------------------------------------------------------
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
