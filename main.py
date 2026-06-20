@@ -43,44 +43,67 @@ from risk_manager import RiskManager
 from state import load_state, save_state
 
 from flask import Flask
-
-app = Flask(__name__)  # <-- Αυτό είναι το object που ψάχνει η Gunicorn
-
 import time
 from datetime import datetime
+import os
 
-# Τελευταία φορά που τραβήχτηκαν τεχνικά δεδομένα
+app = Flask(__name__)
+
+# ------------------------------------------------------------
+# 1. Ορισμός των συναρτήσεων του bot
+# ------------------------------------------------------------
+def run_fast_loop():
+    """Γρήγορο loop: μακρο, νέα, απόφαση, εκτέλεση"""
+    print(f"[{datetime.now()}] Running fast loop...")
+    # Εδώ βάζεις ό,τι έκανες στο while loop σου (μακρο/νέα)
+    return "No action"
+
+def run_technical_refresh():
+    """Ανανέωση τεχνικών δεδομένων (4H candles)"""
+    print(f"[{datetime.now()}] Refreshing technical data...")
+    # Εδώ βάζεις την κλήση στο Kraken για τα κεριά
+    return "Technical data updated"
+
+# ------------------------------------------------------------
+# 2. Global μεταβλητή για το πότε έγινε το τελευταίο refresh
+# ------------------------------------------------------------
 last_technical_refresh = 0
 
+# ------------------------------------------------------------
+# 3. Το route που καλεί το cron-job.org
+# ------------------------------------------------------------
 @app.route('/')
 def home():
     global last_technical_refresh
-    
+
     now = time.time()
     print(f"[{datetime.now()}] Bot called by cron-job.org")
 
-    # 1. Πάντα τρέχουμε το γρήγορο loop (μακρο + νέα + απόφαση)
-    #    Αυτό υποθέτω ότι είναι μια συνάρτηση που λέγεται π.χ. `run_fast_loop()`
+    # Πάντα τρέχουμε το γρήγορο loop
     try:
-        result = run_fast_loop()  # η δική σου συνάρτηση για μακρο/νέα/απόφαση
+        result = run_fast_loop()
         print(f"[{datetime.now()}] Fast loop result: {result}")
     except Exception as e:
         print(f"[{datetime.now()}] ERROR in fast loop: {e}")
         return f"Error: {e}", 500
 
-    # 2. Έλεγχος αν πρέπει να ανανεώσουμε τα τεχνικά (κάθε 15 λεπτά = 900 sec)
+    # Κάθε 15 λεπτά (900 sec) ανανεώνουμε τα τεχνικά
     if now - last_technical_refresh >= 900:
         print(f"[{datetime.now()}] Refreshing technical data (4H candles)...")
         try:
-            run_technical_refresh()  # η δική σου συνάρτηση για τεχνικά
+            run_technical_refresh()
             last_technical_refresh = now
             print(f"[{datetime.now()}] Technical data refreshed")
         except Exception as e:
             print(f"[{datetime.now()}] ERROR in technical refresh: {e}")
-            # Δεν κάνουμε return error για να μην χαλάσει το cron-job
-            # αλλά το καταγράφουμε
 
     return "OK", 200
+
+# ------------------------------------------------------------
+# 4. (Προαιρετικό) Τοπική εκτέλεση για testing
+# ------------------------------------------------------------
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=10000)
   
 def load_config(path: str = "config.yaml") -> dict:
     with open(path, "r") as f:
