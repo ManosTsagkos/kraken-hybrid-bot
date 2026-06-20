@@ -42,6 +42,13 @@ from order_executor import OrderExecutor
 from risk_manager import RiskManager
 from state import load_state, save_state
 
+from flask import Flask
+
+app = Flask(__name__)  # <-- Αυτό είναι το object που ψάχνει η Gunicorn
+
+@app.route('/')
+def home():
+    return "Hello, World!"
 
 def load_config(path: str = "config.yaml") -> dict:
     with open(path, "r") as f:
